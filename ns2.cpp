@@ -15,6 +15,23 @@ YET ANOTHER NEOSENSE PROGRAM!
 #include <thread>
 #include <chrono>
 #include <deque>
+#include <thread>
+#include <stdlib.h>
+
+
+//includes for free running clock
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#define ST_BASE (0x3F003000)
+#define TIMER_OFFSET (4)
+
+//includes for raspberry pi gpio
+#include <wiringPi.h>
+#include <wiringPiSPI.h>
+
 using namespace std;
 
 //Necessary evils :`(
@@ -42,7 +59,6 @@ double peakAverage;
 double BPM;
 bool buffersInitialised = false;
 bool rPeakDetected = false;
-
 
 void exportScreenshot() {
 	static int fileIterator = 0;
@@ -113,19 +129,19 @@ double panTompkins(int timestamp, double passedData)
 	}
 
 	//Check for peak
-	if (result > currentPeak ) currentPeak = result;
+	if (result > currentPeak) currentPeak = result;
 	peakWindowCounter++;
 
-	if ( globalTimestamp > 3000)
+	if (globalTimestamp > 3000)
 	{
 		//check if result exceeds threshold and is less than 0.5 seconds (360Hz/2) since last peak
-		if (result > peakAverage* peakThreshold&& i - RRintervals[0].back() > 200 )
+		if (result > peakAverage* peakThreshold&& i - RRintervals[0].back() > 200)
 		{
 			//peak detected!
-			rPeakDetected = true;			
-				RRintervals[0].push_back(i);
-				RRintervals[1].push_back(result);
-			
+			rPeakDetected = true;
+			RRintervals[0].push_back(i);
+			RRintervals[1].push_back(result);
+
 			//keep RRintervals at only last numRRintervalsForAverage values
 			while (RRintervals[0].size() > numRRintervalsForAverage) {
 				RRintervals[0].pop_front();
@@ -147,66 +163,110 @@ double panTompkins(int timestamp, double passedData)
 	}
 
 	//every second get the peak and get the average of the last 5 seconds worth of peaks
-	if (peakWindowCounter == peakAverageWindowSize )
+	if (peakWindowCounter == peakAverageWindowSize)
 	{
-		
 		if (!buffersInitialised)
 		{
 			peakAverageValues.push_back(currentPeak);
-			if (globalTimestamp > 3000 ) buffersInitialised = true;
+			if (globalTimestamp > 3000) buffersInitialised = true;
 			RRintervals[1].push_back(currentPeak);
 			RRintervals[0].push_back(i);
 		}
-		
+
 		peakAverageValues.push_back(currentPeak);
 		while (peakAverageValues.size() > 5) peakAverageValues.pop_front();
+
 		peakAverage = 0;
-		for (size_t i = 0; i < peakAverageValues.size() ; i++)
+		for (size_t i = 0; i < peakAverageValues.size(); i++)
 		{
 			peakAverage += peakAverageValues[i];
 		}
 		peakAverage /= peakAverageValues.size();
-		//cout << "Peak Average = " << peakAverage << endl;
 		currentPeak = 0;
 		peakWindowCounter = 0;
-
-		//register 1st second having passed and mark first RR interval as a starting point
 	}
 	dataStorage[4].push_back(peakAverage);
-
-	/*
-	for (size_t i = 0; i < RRintervals[0].size() - 1; i++)
-	{
-		cout << "TS: " << RRintervals[0][i] << " result: " << RRintervals[1][i] << endl;
-	}
-	*/
 	return result;
 }
 
-void takeConstantReadings()
+double takeSingleReading() //Take a single reading from ADC channel 2
 {
-	string filename = "mit/x104.csv";
-	ifstream file(filename);
-	string line;
-	const char* c_string;
+	int channel = 2;
+	uint8_t buff[4];
+	buff[0] = 6;
+	buff[1] = (8 + channel) << 6;         //should be "buff[1] = (8+0)<<6;" change the 0 for other channels eg. 1-7
+	buff[2] = 0;
+	buff[3] = 0;
+
+	wiringPiSPIDataRW(0, buff, 3);
+	int rawADCValue = ((buff[1] & 0x0F) << 8) | buff[2];
+	double reading = (float)rawADCValue; //scaling for screen height
+	reading /= 10;
+	/*
+	//biquad filters
+	if (menuButtonState[0]) reading = lowPassFilter[i]->process(reading);
+	if (menuButtonState[1]) reading = notchFilter[i]->process(reading);
+	//if (menuButtonState[2]) reading = firFilter[i]->do_sample( (double) reading);
+
+	//FIR filters only working on channel 2 at the moment! MAKE AN ARRAY!
+	if (menuButtonState[2] && i == 2) {
+		//firComb_inputFromFloat(fir3);
+		//firComb_outputToFloat(reading);
+		firComb_writeInput(fir3, reading);
+		reading = firComb_readOutput(fir3);
+
+		//reading += 760;
+	}
+	if (menuButtonState[3] && i == 2) {
+		firLP_writeInput(fir2, reading);
+		reading = firLP_readOutput(fir2);
+		//reading += 760;
+	}
+	//if (menuButtonState[2]) reading = firFilter[i]->do_sample( (double) reading);
+	//need to double up these^^^? nested filtering notchFilter->process(lowPassFilter->process(rawADCValue));
+	*/
+	return reading;
+}
+
+int takeConstantReadings()
+{
+	long long int t, prev, * timer; // 64 bit timer
+	int fd;
+	void* st_base; // byte ptr to simplify offset math
 	double reading;
 	int isItTen = 0;
 	double PTresult;
 
-	while (1) {
-		for (size_t i = 0; i < 1805555; i++)
-		{
-			//GET READING, to be replaced with PI ADC function
-			getline(file, line);
-			c_string = line.c_str();
-			reading = atof(c_string);
-			//END GET READING
+	// get access to system core memory
+	if (-1 == (fd = open("/dev/mem", O_RDONLY))) {
+		fprintf(stderr, "open() failed.\n");
+		return 255;
+	}
 
+	// map a specific page into process's address space
+	if (MAP_FAILED == (st_base = mmap(NULL, 4096,
+		PROT_READ, MAP_SHARED, fd, ST_BASE))) {
+		fprintf(stderr, "mmap() failed.\n");
+		return 254;
+	}
+
+	// set up pointer, based on mapped page
+	timer = (long long int*)((char*)st_base + TIMER_OFFSET);
+
+	// read initial timer   
+	prev = *timer;
+
+	while (1)
+	{
+		t = *timer;
+		if (t - prev >= 1000)
+		{
+			prev = t;
+			reading = takeSingleReading();
 			PTresult = panTompkins(globalTimestamp, reading);
 
 			globalTimestamp++;
 			isItTen++;
-
 			if (isItTen == 10)
 			{
 				waveformIterator++;
@@ -227,13 +287,23 @@ void takeConstantReadings()
 					waveformFiducials[waveformIterator] = -1;
 				}
 			}
-			this_thread::sleep_for(std::chrono::milliseconds(1));
 		}
 	}
+	return 0;
 }
 
 int main(int argc, char* argv[])
 {
+	//GPIO INIT
+	setenv("WIRINGPI_GPIOMEM", "1", 1);
+
+	if (wiringPiSPISetup(0, 2000000) < 0) //check if SPI connection exists
+	{
+		printf("WiringPi setup FAIL");
+		return -1;
+	}
+	piHiPri(20); //RASPBERRY PI PRIORITY FLAG
+
 	// Initialization
 	vector <double> waveForm1, waveForm2, waveForm3, waveFormFiducials, mitECGdata;
 	Font font = GetFontDefault();
@@ -256,12 +326,12 @@ int main(int argc, char* argv[])
 	};
 	bool PTboxesState[8] = { 0,0,0,0,1,0,1,0 };
 
+	thread reading(takeConstantReadings);
 	//raylib init
 	int screenWidth = 800;
 	int screenHeight = 480;
 	InitWindow(screenWidth, screenHeight, "NeoSense V2");
 	SetTargetFPS(60);
-	thread readingThread(takeConstantReadings);
 
 	//load graphics resources
 	Texture2D texturePlay = LoadTexture("res/play.png");
@@ -347,6 +417,6 @@ int main(int argc, char* argv[])
 
 	// De-Initialization
 	CloseWindow();        // Close window and OpenGL context
-	readingThread.detach(); //detach 2nd thread
+	reading.detach(); //detach 2nd thread
 	return 0;
 }
