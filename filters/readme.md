@@ -23,7 +23,6 @@
 ## inititalise
     Biquad* notchFilter = new Biquad(bq_type_notch, 50.0 / 1000, 1, 60);
     Biquad* lowPassFilter = new Biquad(bq_type_lowpass, 35.0 / 1000, 1, 60);
-
 ## use
     reading = notchFilter->process(reading);
     reading = lowPassFilter->process(reading);
