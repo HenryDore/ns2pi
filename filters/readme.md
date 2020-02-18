@@ -26,7 +26,7 @@
 # Biquad.cpp filters
     #include "filters/Biquad.cpp"
     #include "filters/Biquad.h"
-## inititalise
+## initialise
     Biquad* notchFilter = new Biquad(bq_type_notch, 50.0 / 1000, 1, 60);
     Biquad* lowPassFilter = new Biquad(bq_type_lowpass, 35.0 / 1000, 1, 60);
 ## use
