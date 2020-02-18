@@ -1,4 +1,4 @@
-#Micromodeler fir filters
+# Micromodeler fir filters
 
     #include "filters/firNotch.h"
     #include "filters/firNotch.cpp"
@@ -7,7 +7,7 @@
     #include "filters/firComb.h"
     #include "filters/firComb.cpp"
 
-##use
+## use
     firComb_writeInput(fir3, reading);
     reading = firComb_readOutput(fir3);
 
@@ -15,27 +15,27 @@
     reading = firLP_readOutput(fir2);
 
 
-#filth filthers (no notch available)
+# filth filthers (no notch available)
 
     #include "filters/filt.h"
     #include "filters/filt.cpp"
 
-##initialise
+## initialise
     Filter* firFilter = new Filter(LPF, 10, 1, 0.2);
 
-##use
+## use
     reading = firFilter[i]->do_sample((double)reading);
 
 
 
-#Biquad.cpp filters
+# Biquad.cpp filters
     #include "filters/Biquad.cpp"
     #include "filters/Biquad.h"
 
-##inititalise
+## inititalise
     Biquad* notchFilter = new Biquad(bq_type_notch, 50.0 / 1000, 1, 60);
     Biquad* lowPassFilter = new Biquad(bq_type_lowpass, 35.0 / 1000, 1, 60);
 
-##use
+## use
     reading = notchFilter->process(reading);
     reading = lowPassFilter->process(reading);
