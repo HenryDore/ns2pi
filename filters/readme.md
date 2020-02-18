@@ -1,7 +1,7 @@
 //=========================================================================
 //Micromodeler fir filters
 //=========================================================================
-'#include "filters/firNotch.h"'
+'''#include "filters/firNotch.h"'''
 #include "filters/firNotch.cpp"
 #include "filters/firLP.h"
 #include "filters/firLP.cpp"
