@@ -16,7 +16,7 @@
     reading = firLP_readOutput(fir2);
     firComb_writeInput(fir3, reading);
     reading = firComb_readOutput(fir3);
-# filth filthers (no notch available)
+# FILTH filthers (no notch available)
     #include "filters/filt.h"
     #include "filters/filt.cpp"
 ## initialise
