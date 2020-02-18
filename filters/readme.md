@@ -5,11 +5,17 @@
     #include "filters/firLP.cpp"
     #include "filters/firComb.h"
     #include "filters/firComb.cpp"
+## initialise
+    firNotchType* fir1 = firNotch_create();
+    firLPType* fir2 = firLP_create();   
+    firCombType* fir3 = firComb_create();
 ## use
-    firComb_writeInput(fir3, reading);
-    reading = firComb_readOutput(fir3);
+    firLP_writeInput(fir1, reading);
+    reading = firLP_readOutput(fir1);
     firLP_writeInput(fir2, reading);
     reading = firLP_readOutput(fir2);
+    firComb_writeInput(fir3, reading);
+    reading = firComb_readOutput(fir3);
 # filth filthers (no notch available)
     #include "filters/filt.h"
     #include "filters/filt.cpp"
