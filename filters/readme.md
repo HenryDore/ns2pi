@@ -1,12 +1,12 @@
 //=========================================================================
 //Micromodeler fir filters
 //=========================================================================
-'''#include "filters/firNotch.h"'''
+`#include "filters/firNotch.h"
 #include "filters/firNotch.cpp"
 #include "filters/firLP.h"
 #include "filters/firLP.cpp"
 #include "filters/firComb.h"
-#include "filters/firComb.cpp"
+#include "filters/firComb.cpp"`
 
 //use
 firComb_writeInput(fir3, reading);
