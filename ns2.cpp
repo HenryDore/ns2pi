@@ -47,6 +47,7 @@ double peakThreshold = 0.75;
 int globalTimestamp = 0;
 bool PTboxesState[8] = { 0,0,0,0,1,0,0,0 };
 bool haltReadings = false;
+bool closeThread = false;
 
 //waveform globals
 double waveformRawData[600] = { 0 };
@@ -286,7 +287,7 @@ int takeConstantReadings()
 	// read initial timer   
 	prev = *timer;
 
-	while (1)
+	while (!closeThread)
 	{
 		if (!haltReadings)
 		{
@@ -508,6 +509,8 @@ int main(int argc, char* argv[])
 
 	// De-Initialization
 	CloseWindow();        // Close window and OpenGL context
-	reading.detach(); //detach 2nd thread
+	closeThread = true;
+	reading.join(); //detach 2nd thread
+	sleep(1); // wait for thread to end
 	return 0;
 }
