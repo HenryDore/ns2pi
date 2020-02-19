@@ -11,7 +11,7 @@
     firCombType* fir3 = firComb_create();
 ## use
     firNotch_writeInput(fir1, reading);
-    reading = firLP_readOutput(fir1);
+    reading = firNotch_readOutput(fir1);
     firLP_writeInput(fir2, reading);
     reading = firLP_readOutput(fir2);
     firComb_writeInput(fir3, reading);
