@@ -5,6 +5,12 @@ YET ANOTHER NEOSENSE PROGRAM!
 ********************************************************************************************/
 #define _CRT_SECURE_NO_WARNINGS
 #include "raylib.h"
+#include "filters/firLP.h"
+#include "filters/firLP.cpp"
+#include "filters/firNotch.h"
+#include "filters/firNotch.cpp"
+#include "filters/firComb.h"
+#include "filters/firComb.cpp"
 #include <algorithm>
 #include <sstream>
 #include <fstream>
@@ -39,6 +45,8 @@ int waveformIterator = 0;
 int numRRintervalsForAverage = 8;
 double peakThreshold = 0.75;
 int globalTimestamp = 0;
+bool PTboxesState[8] = { 0,0,0,0,1,0,0,0 };
+bool haltReadings = false;
 
 //waveform globals
 double waveformRawData[600] = { 0 };
@@ -60,22 +68,34 @@ double BPM;
 bool buffersInitialised = false;
 bool rPeakDetected = false;
 
+//filters
+firNotchType* fir1 = firNotch_create();
+firLPType* fir2 = firLP_create();   
+firCombType* fir3 = firComb_create();
+
 void exportScreenshot() {
 	static int fileIterator = 0;
-	fileIterator++;
 	string builder;
 	builder += "screenshots/screenshot";
 	builder += to_string(fileIterator);
 	builder += ".png";
 	const char* fileName = builder.c_str();
 	TakeScreenshot(fileName);
+	fileIterator++;
 }
 
 void writeCSVFile()
 {
+	static int csvFileIterator = 0;
+	string csvbuilder;
+	csvbuilder += "data/data";
+	csvbuilder += to_string(csvFileIterator);
+	csvbuilder += ".csv";
+	const char* csvFileName = csvbuilder.c_str();
+	
 	FILE* fp;   // file pointer
-	fp = fopen("savedData.csv", "w");   //create/wipe file
-	cout << "Writing data file: savedData.csv... " << endl;
+	fp = fopen(csvFileName, "w");   //create/wipe file
+	cout << "Writing data file: " << csvFileName << "..." << endl;
 	fprintf(fp, "ECG data, Difference, Square, Moving average, Peak average\n");//column headers
 	for (size_t k = 0; k < dataStorage[0].size(); k++)
 	{
@@ -88,7 +108,8 @@ void writeCSVFile()
 		fprintf(fp, "\n");
 	}
 	fclose(fp);
-	cout << "File written: savedData.csv... " << endl;
+	csvFileIterator++;
+	cout << "File written: " << csvFileName << endl;
 }
 
 double panTompkins(int timestamp, double passedData)
@@ -113,6 +134,10 @@ double panTompkins(int timestamp, double passedData)
 		dataStorage[2].push_back(result);
 		movingAverageBuffer.push_back(result);
 	}
+	else { //keep vectors from being empty
+	dataStorage[1].push_back(0);
+	dataStorage[2].push_back(0);
+	}
 
 	//need <windowSize> number of readings for
 	//moving window integration: y(nT) = 1/N [x(nT-(N-1)T) + [x(nT-(N-2)T) +...+ x(nT)]
@@ -126,6 +151,10 @@ double panTompkins(int timestamp, double passedData)
 		}
 		result = movingAverage /= movingAverageWindowSize;
 		dataStorage[3].push_back(result);
+	}
+	else
+	{
+		dataStorage[3].push_back(0);
 	}
 
 	//Check for peak
@@ -189,7 +218,7 @@ double panTompkins(int timestamp, double passedData)
 	return result;
 }
 
-double takeSingleReading() //Take a single reading from ADC channel 2
+float takeSingleReading() //Take a single reading from ADC channel 2
 {
 	int channel = 2;
 	uint8_t buff[4];
@@ -200,7 +229,8 @@ double takeSingleReading() //Take a single reading from ADC channel 2
 
 	wiringPiSPIDataRW(0, buff, 3);
 	int rawADCValue = ((buff[1] & 0x0F) << 8) | buff[2];
-	double reading = (float)rawADCValue; //scaling for screen height
+	float reading = (float)rawADCValue; //scaling for screen height
+	
 	reading /= 10;
 	/*
 	//biquad filters
@@ -233,9 +263,9 @@ int takeConstantReadings()
 	long long int t, prev, * timer; // 64 bit timer
 	int fd;
 	void* st_base; // byte ptr to simplify offset math
-	double reading;
+	float reading;
 	int isItTen = 0;
-	double PTresult;
+	float PTresult;
 
 	// get access to system core memory
 	if (-1 == (fd = open("/dev/mem", O_RDONLY))) {
@@ -258,33 +288,57 @@ int takeConstantReadings()
 
 	while (1)
 	{
-		t = *timer;
-		if (t - prev >= 1000)
+		if (!haltReadings)
 		{
-			prev = t;
-			reading = takeSingleReading();
-			PTresult = panTompkins(globalTimestamp, reading);
-
-			globalTimestamp++;
-			isItTen++;
-			if (isItTen == 10)
+			t = *timer;
+			if (t - prev >= 1000)
 			{
-				waveformIterator++;
-				if (waveformIterator >= 600) waveformIterator = 0;
-				waveformRawData[waveformIterator] = reading;
-				waveformMovingAverage[waveformIterator] = PTresult * 10;
-				waveformPeak[waveformIterator] = currentPeak * 10;
-				waveformPeakAverage[waveformIterator] = peakAverage * 10;
-				isItTen = 0;
-
-				if (rPeakDetected)
-				{
-					waveformFiducials[waveformIterator] = reading + 100; //need to scale this properly
-					rPeakDetected = false;
+				prev = t;
+				reading = takeSingleReading();
+				
+				if (PTboxesState[4])
+				{//LP FILTER
+					
+					firNotch_writeInput(fir1, reading);
+					reading = firNotch_readOutput(fir1);
 				}
-				else
+				
+				if (PTboxesState[5])
+				{//LP FILTER
+					
+					firLP_writeInput(fir2, reading);
+					reading = firLP_readOutput(fir2);
+				}
+				if (PTboxesState[6])
+				{//LP FILTER
+					
+					firComb_writeInput(fir3, reading);
+					reading = firComb_readOutput(fir3);
+				}
+				
+				PTresult = panTompkins(globalTimestamp, reading);
+
+				globalTimestamp++;
+				isItTen++;
+				if (isItTen == 10)
 				{
-					waveformFiducials[waveformIterator] = -1;
+					waveformIterator++;
+					if (waveformIterator >= 600) waveformIterator = 0;
+					waveformRawData[waveformIterator] = reading;
+					waveformMovingAverage[waveformIterator] = PTresult * 10;
+					waveformPeak[waveformIterator] = currentPeak * 10;
+					waveformPeakAverage[waveformIterator] = peakAverage * 10;
+					isItTen = 0;
+
+					if (rPeakDetected)
+					{
+						waveformFiducials[waveformIterator] = reading + 100; //need to scale this properly
+						rPeakDetected = false;
+					}
+					else
+					{
+						waveformFiducials[waveformIterator] = -1;
+					}
 				}
 			}
 		}
@@ -324,9 +378,11 @@ int main(int argc, char* argv[])
 		{680,335,110,50},
 		{680,400,110,50}
 	};
-	bool PTboxesState[8] = { 0,0,0,0,1,0,1,0 };
+	Rectangle csvBoxes[2] = {
+		{450,415,50,50},
+		{525,415,50,50}
+	};
 
-	thread reading(takeConstantReadings);
 	//raylib init
 	int screenWidth = 800;
 	int screenHeight = 480;
@@ -334,19 +390,21 @@ int main(int argc, char* argv[])
 	SetTargetFPS(60);
 
 	//load graphics resources
-	Texture2D texturePlay = LoadTexture("res/play.png");
-	Texture2D texturePause = LoadTexture("res/pause.png");
+	//Texture2D texturePlay = LoadTexture("res/play.png");
+	//Texture2D texturePause = LoadTexture("res/pause.png");
 	Texture2D textureReset = LoadTexture("res/reset.png");
-	Texture2D textureReturn = LoadTexture("res/return.png");
-	Texture2D textureSettings = LoadTexture("res/settings.png");
-	Texture2D textureStamp = LoadTexture("res/stamp.png");
-	Texture2D textureExit = LoadTexture("res/exit.png");
-	Texture2D textureECG = LoadTexture("res/ecg.png");
-	Texture2D textureTick = LoadTexture("res/tick.png");
+	//Texture2D textureReturn = LoadTexture("res/return.png");
+	//Texture2D textureSettings = LoadTexture("res/settings.png");
+	//Texture2D textureStamp = LoadTexture("res/stamp.png");
+	//Texture2D textureExit = LoadTexture("res/exit.png");
+	//Texture2D textureECG = LoadTexture("res/ecg.png");
 	Texture2D textureCsv = LoadTexture("res/csv.png");
+	Texture2D textureTick = LoadTexture("res/tick.png");
 	Texture2D texturePlus = LoadTexture("res/plus.png");
 	Texture2D textureMinus = LoadTexture("res/minus.png");
 
+	thread reading(takeConstantReadings);
+	sleep (1);
 	// Main loop
 	while (!WindowShouldClose())    // Detect window close button or ESC key
 	{
@@ -364,6 +422,32 @@ int main(int argc, char* argv[])
 		for (int i = 4; i < 8; i++) {
 			if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mouse, PTboxes[i])) PTboxesState[i] = !PTboxesState[i];
 		}
+
+		if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mouse, csvBoxes[0]))
+		{
+			//reset saved data
+			haltReadings = true;
+			sleep(1);
+			for (int i = 0 ; i < 5 ; i++)
+			{
+			dataStorage[i].clear();
+			}
+			cout << "dataStorage: reset" << endl;
+			sleep(1);
+			haltReadings = false;
+		}
+		if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mouse, csvBoxes[1])) 
+		{
+			//write to CSV file
+			haltReadings = true;
+			sleep(1);
+			writeCSVFile();
+			sleep(1);
+			haltReadings = false;
+		}
+
+
+		//data export
 
 		// Draw
 		BeginDrawing();
@@ -398,12 +482,19 @@ int main(int argc, char* argv[])
 				DrawTexture(textureTick, PTboxes[i].x, PTboxes[i].y, WHITE);
 			}
 		}
+		DrawTexture(textureReset, csvBoxes[0].x, csvBoxes[0].y, WHITE);
+		DrawTexture(textureCsv, csvBoxes[1].x, csvBoxes[1].y, WHITE);
+		
 		for (int i = 0; i < 4; i++)
 		{
 			if (i % 2 != 0) DrawTexture(texturePlus, PTboxes[i].x, PTboxes[i].y, WHITE);
 			else DrawTexture(textureMinus, PTboxes[i].x, PTboxes[i].y, WHITE);
-			DrawText("CheckText", PTcheckTextBox[i].x, PTcheckTextBox[i].y + 20, 10, WHITE);
 		}
+		
+		DrawText("Notch filter", PTcheckTextBox[0].x, PTcheckTextBox[0].y + 20, 10, WHITE);
+		DrawText("Low pass filter", PTcheckTextBox[1].x, PTcheckTextBox[1].y + 20, 10, WHITE);
+		DrawText("Comb filter", PTcheckTextBox[2].x, PTcheckTextBox[2].y + 20, 10, WHITE);
+		
 		DrawText("RR intervals for BPM:", 625, 20, 10, WHITE);
 		DrawText("Threshold Percentage:", 625, 110, 10, WHITE);
 		DrawText(FormatText("%i", numRRintervalsForAverage - 1), 690, 55, 20, WHITE);
