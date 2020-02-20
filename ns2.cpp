@@ -24,7 +24,6 @@ YET ANOTHER NEOSENSE PROGRAM!
 #include <thread>
 #include <stdlib.h>
 
-
 //includes for free running clock
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -48,6 +47,7 @@ int globalTimestamp = 0;
 bool PTboxesState[8] = { 0,0,0,0,1,0,0,0 };
 bool haltReadings = false;
 bool closeThread = false;
+float FRAmax = 0;
 
 //waveform globals
 double waveformRawData[600] = { 0 };
@@ -58,7 +58,7 @@ double waveformPeakAverage[600] = { 0 };
 
 //Pan tompkins globals
 vector <double> dataStorage[5];
-int movingAverageWindowSize = 50;
+int movingAverageWindowSize = 150;
 int peakWindowCounter = 0;
 int peakAverageWindowSize = 1000; //1 second at 1000 Hz
 deque <double> peakAverageValues, ECGbuffer, movingAverageBuffer, RRintervals[2];
@@ -96,7 +96,7 @@ void writeCSVFile()
 	
 	ofstream myFile(csvFileName);
 	
-	const size_t bufsize = 256*1024;
+	const size_t bufsize = 1024*1024;
 	char buf[bufsize];
 	myFile.rdbuf()->pubsetbuf(buf, bufsize);
 	
@@ -106,7 +106,9 @@ void writeCSVFile()
 		if ( dataStorage[j].size() < minVecSize ) minVecSize = dataStorage[j].size();
 	}
 	myFile << "(Raw)ECGDATA,DIFFERENCE,SQUARE,MOVINGAVERAGE,peakAverage" << endl;
-	for (size_t k = 0; k < minVecSize ; k++)
+	u_int vecStart = 0;
+	if (minVecSize > 10000) vecStart = minVecSize - 10000; //max 60 seconds of data written to .csv
+	for ( u_int k  = vecStart ; k < minVecSize ; k++)
 	{
 		for (size_t l = 0; l < 5 ; l++){
 			myFile << dataStorage[l][k] << ",";
@@ -114,7 +116,7 @@ void writeCSVFile()
 		myFile << endl;
 	}
 	myFile.close();
-	cout << "File written: " << csvFileName << " Length: " << minVecSize/1000 << " seconds" <<endl;
+	cout << "File written: " << csvFileName << " Length: " << (minVecSize-vecStart)/1000 << " seconds" <<endl;
 	csvFileIterator++;
 }
 
@@ -219,6 +221,8 @@ double panTompkins(int timestamp, double passedData)
 		peakAverage /= peakAverageValues.size();
 		currentPeak = 0;
 		peakWindowCounter = 0;
+		//FRA debug
+		FRAmax = 0;
 	}
 	dataStorage[4].push_back(peakAverage);
 	return result;
@@ -238,29 +242,7 @@ float takeSingleReading() //Take a single reading from ADC channel 2
 	float reading = (float)rawADCValue; //scaling for screen height
 	
 	reading /= 10;
-	/*
-	//biquad filters
-	if (menuButtonState[0]) reading = lowPassFilter[i]->process(reading);
-	if (menuButtonState[1]) reading = notchFilter[i]->process(reading);
-	//if (menuButtonState[2]) reading = firFilter[i]->do_sample( (double) reading);
 
-	//FIR filters only working on channel 2 at the moment! MAKE AN ARRAY!
-	if (menuButtonState[2] && i == 2) {
-		//firComb_inputFromFloat(fir3);
-		//firComb_outputToFloat(reading);
-		firComb_writeInput(fir3, reading);
-		reading = firComb_readOutput(fir3);
-
-		//reading += 760;
-	}
-	if (menuButtonState[3] && i == 2) {
-		firLP_writeInput(fir2, reading);
-		reading = firLP_readOutput(fir2);
-		//reading += 760;
-	}
-	//if (menuButtonState[2]) reading = firFilter[i]->do_sample( (double) reading);
-	//need to double up these^^^? nested filtering notchFilter->process(lowPassFilter->process(rawADCValue));
-	*/
 	return reading;
 }
 
@@ -322,6 +304,9 @@ int takeConstantReadings()
 					reading = firComb_readOutput(fir3);
 				}
 				
+				//DEBUG for FRA
+				if (reading > FRAmax) FRAmax = reading; 
+
 				PTresult = panTompkins(globalTimestamp, reading);
 
 				globalTimestamp++;
@@ -362,7 +347,7 @@ int main(int argc, char* argv[])
 		printf("WiringPi setup FAIL");
 		return -1;
 	}
-	piHiPri(20); //RASPBERRY PI PRIORITY FLAG
+	//piHiPri(20); //RASPBERRY PI PRIORITY FLAG
 
 	// Initialization
 	vector <double> waveForm1, waveForm2, waveForm3, waveFormFiducials, mitECGdata;
@@ -416,8 +401,10 @@ int main(int argc, char* argv[])
 	{
 		//Input handling
 		//Keyboard
-		if (IsKeyPressed(KEY_S)) exportScreenshot();
-		if (IsKeyPressed(KEY_W)) writeCSVFile();
+		//if (IsKeyReleased(KEY_S)) exportScreenshot();
+		//if (IsKeyReleased(KEY_Z)) FRAmax = 0;
+		//if (IsKeyReleased(KEY_W)) cout << FRAmax << endl;
+		
 
 		//mouse & touchscreen
 		Vector2 mouse = GetMousePosition();
@@ -506,7 +493,7 @@ int main(int argc, char* argv[])
 		DrawText(FormatText("%i", numRRintervalsForAverage - 1), 690, 55, 20, WHITE);
 		DrawText(FormatText("%.0f", peakThreshold * 100), 690, 145, 20, WHITE);
 		DrawText(FormatText("BPM: %.1f", BPM), 50, 410, 20, WHITE);
-		DrawText(FormatText("Raw Data: %.0f", ECGbuffer.back()), 50, 430, 20, WHITE);
+		DrawText(FormatText("FRAmax: %.0f", FRAmax), 50, 430, 20, WHITE);
 		DrawText(FormatText("Moving Average: %.2f", waveformMovingAverage[waveformIterator]), 200, 410, 20, WHITE);
 		DrawText(FormatText("peakAverage: %.2f", peakAverage), 200, 430, 20, WHITE);
 		EndDrawing();
