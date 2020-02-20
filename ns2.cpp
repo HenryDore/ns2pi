@@ -94,23 +94,28 @@ void writeCSVFile()
 	csvbuilder += ".csv";
 	const char* csvFileName = csvbuilder.c_str();
 	
-	FILE* fp;   // file pointer
-	fp = fopen(csvFileName, "w");   //create/wipe file
-	cout << "Writing data file: " << csvFileName << "..." << endl;
-	fprintf(fp, "ECG data, Difference, Square, Moving average, Peak average\n");//column headers
-	for (size_t k = 0; k < dataStorage[0].size(); k++)
+	ofstream myFile(csvFileName);
+	
+	const size_t bufsize = 256*1024;
+	char buf[bufsize];
+	myFile.rdbuf()->pubsetbuf(buf, bufsize);
+	
+	size_t minVecSize = dataStorage[0].size();
+	for (size_t j = 0 ; j < 5 ; j++)
 	{
-		//file headers (Raw)ECGDATA,DIFFERENCE,SQUARE,MOVINGAVERAGE,peakAverage
-		fprintf(fp, "%f,", dataStorage[0][k]);
-		fprintf(fp, "%f,", dataStorage[1][k]);
-		fprintf(fp, "%f,", dataStorage[2][k]);
-		fprintf(fp, "%f,", dataStorage[3][k]);
-		fprintf(fp, "%f", dataStorage[4][k]);
-		fprintf(fp, "\n");
+		if ( dataStorage[j].size() < minVecSize ) minVecSize = dataStorage[j].size();
 	}
-	fclose(fp);
+	myFile << "(Raw)ECGDATA,DIFFERENCE,SQUARE,MOVINGAVERAGE,peakAverage" << endl;
+	for (size_t k = 0; k < minVecSize ; k++)
+	{
+		for (size_t l = 0; l < 5 ; l++){
+			myFile << dataStorage[l][k] << ",";
+		}
+		myFile << endl;
+	}
+	myFile.close();
+	cout << "File written: " << csvFileName << " Length: " << minVecSize/1000 << " seconds" <<endl;
 	csvFileIterator++;
-	cout << "File written: " << csvFileName << endl;
 }
 
 double panTompkins(int timestamp, double passedData)
