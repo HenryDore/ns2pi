@@ -44,7 +44,7 @@ int waveformIterator = 0;
 int numRRintervalsForAverage = 8;
 double peakThreshold = 0.75;
 int globalTimestamp = 0;
-bool PTboxesState[8] = { 0,0,0,0,1,0,0,0 };
+bool PTboxesState[8] = { 0,0,0,0,0,1,1,0 };
 bool haltReadings = false;
 bool closeThread = false;
 float FRAmax = 0;
@@ -59,6 +59,7 @@ double waveformPeakAverage[600] = { 0 };
 //Pan tompkins globals
 vector <double> dataStorage[5];
 int movingAverageWindowSize = 150;
+int numPeaksForAverage = 5;
 int peakWindowCounter = 0;
 int peakAverageWindowSize = 1000; //1 second at 1000 Hz
 deque <double> peakAverageValues, ECGbuffer, movingAverageBuffer, RRintervals[2];
@@ -211,7 +212,7 @@ double panTompkins(int timestamp, double passedData)
 		}
 
 		peakAverageValues.push_back(currentPeak);
-		while (peakAverageValues.size() > 5) peakAverageValues.pop_front();
+		while (peakAverageValues.size() > numPeaksForAverage) peakAverageValues.pop_front();
 
 		peakAverage = 0;
 		for (size_t i = 0; i < peakAverageValues.size(); i++)
@@ -230,7 +231,7 @@ double panTompkins(int timestamp, double passedData)
 
 float takeSingleReading() //Take a single reading from ADC channel 2
 {
-	int channel = 2;
+	int channel = PTboxesState[7];
 	uint8_t buff[4];
 	buff[0] = 6;
 	buff[1] = (8 + channel) << 6;         //should be "buff[1] = (8+0)<<6;" change the 0 for other channels eg. 1-7
@@ -416,7 +417,7 @@ int main(int argc, char* argv[])
 			if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mouse, PTboxes[i])) PTboxesState[i] = !PTboxesState[i];
 		}
 
-		if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mouse, csvBoxes[0]))
+		if ((IsMouseButtonReleased(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mouse, csvBoxes[0])) || IsKeyReleased(KEY_R))
 		{
 			//reset saved data
 			haltReadings = true;
@@ -429,7 +430,7 @@ int main(int argc, char* argv[])
 			sleep(1);
 			haltReadings = false;
 		}
-		if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mouse, csvBoxes[1])) 
+		if ((IsMouseButtonReleased(MOUSE_LEFT_BUTTON) && CheckCollisionPointRec(mouse, csvBoxes[1])) || IsKeyReleased(KEY_W)) 
 		{
 			//write to CSV file
 			haltReadings = true;
@@ -438,8 +439,20 @@ int main(int argc, char* argv[])
 			sleep(1);
 			haltReadings = false;
 		}
-
-
+		DrawText(FormatText("(Y/H)      numPeaksForAverage = %i", numPeaksForAverage), 5, 410, 10, WHITE);
+		DrawText(FormatText("(U/J)   peakAverageWindowSize = %i", peakAverageWindowSize), 5, 425, 10, WHITE);
+		DrawText(FormatText("(I/K) movingAverageWindowSize = %i", movingAverageWindowSize), 5, 440, 10, WHITE);
+		DrawText(FormatText("(O/L)           peakThreshold = %.2f", peakThreshold), 5, 455, 10, WHITE);
+		
+		if (IsKeyReleased(KEY_Y)) numPeaksForAverage++;
+		if (IsKeyReleased(KEY_H)) numPeaksForAverage--;
+		if (IsKeyReleased(KEY_U)) peakAverageWindowSize+=100;
+		if (IsKeyReleased(KEY_J)) peakAverageWindowSize-=100;
+		if (IsKeyReleased(KEY_I)) movingAverageWindowSize+=10;
+		if (IsKeyReleased(KEY_K)) movingAverageWindowSize-=10;
+		if (IsKeyReleased(KEY_O)) peakThreshold+=0.05;
+		if (IsKeyReleased(KEY_L)) peakThreshold-=0.05;
+		
 		//data export
 
 		// Draw
@@ -487,15 +500,22 @@ int main(int argc, char* argv[])
 		DrawText("Notch filter", PTcheckTextBox[0].x, PTcheckTextBox[0].y + 20, 10, WHITE);
 		DrawText("Low pass filter", PTcheckTextBox[1].x, PTcheckTextBox[1].y + 20, 10, WHITE);
 		DrawText("Comb filter", PTcheckTextBox[2].x, PTcheckTextBox[2].y + 20, 10, WHITE);
+		DrawText("HW filters off", PTcheckTextBox[3].x, PTcheckTextBox[3].y + 20, 10, WHITE);
 		
 		DrawText("RR intervals for BPM:", 625, 20, 10, WHITE);
 		DrawText("Threshold Percentage:", 625, 110, 10, WHITE);
 		DrawText(FormatText("%i", numRRintervalsForAverage - 1), 690, 55, 20, WHITE);
 		DrawText(FormatText("%.0f", peakThreshold * 100), 690, 145, 20, WHITE);
-		DrawText(FormatText("BPM: %.1f", BPM), 50, 410, 20, WHITE);
-		DrawText(FormatText("FRAmax: %.0f", FRAmax), 50, 430, 20, WHITE);
-		DrawText(FormatText("Moving Average: %.2f", waveformMovingAverage[waveformIterator]), 200, 410, 20, WHITE);
-		DrawText(FormatText("peakAverage: %.2f", peakAverage), 200, 430, 20, WHITE);
+		//DrawText(FormatText("FRAmax: %.0f", FRAmax), 10, 10, 20, WHITE);
+		DrawText(FormatText("Moving Average: %.0f", waveformMovingAverage[waveformIterator]), 210, 410, 20, WHITE);
+		DrawText(FormatText("peakAverage: %.0f", peakAverage), 210, 430, 20, WHITE);
+		DrawText(FormatText("BPM: %.1f", BPM), 210, 450, 20, GREEN);
+		
+		DrawText(FormatText("(Y/H)      numPeaksForAverage = %i", numPeaksForAverage), 5, 410, 10, WHITE);
+		DrawText(FormatText("(U/J)   peakAverageWindowSize = %i", peakAverageWindowSize), 5, 425, 10, WHITE);
+		DrawText(FormatText("(I/K) movingAverageWindowSize = %i", movingAverageWindowSize), 5, 440, 10, WHITE);
+		DrawText(FormatText("(O/L)           peakThreshold = %.2f", peakThreshold), 5, 455, 10, WHITE);
+		
 		EndDrawing();
 	}
 
